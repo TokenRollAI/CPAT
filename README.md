@@ -12,13 +12,17 @@ budget 压力信号；选择对哪些 block 做 compact / payload offload / arch
 # .env 提供 OPENAI_BASE_URL 与 API_KEY（DeepSeek 的 OpenAI 兼容端点）
 cp .env.example .env
 
-npm install          # 仅 dev 依赖（typescript/@types/node），运行时零依赖
+npm install          # blessed（TUI）为唯一运行时依赖，其余仅 dev
 npm test             # 离线测试 patch 引擎（不调 API）
 npm run demo         # 内置仓库分析任务，小预算强制触发 budget 压力
+npm run tui          # 交互式 TUI：表单设置 max-context/模型/任务，实时显示每轮日志
 
 # 自定义任务
 node src/cli.ts run "你的任务" --workdir <目录> --max-context 16000 --model deepseek-v4-flash
 ```
+
+任务工具：`list_dir` / `read_file` / `grep_search`（只读）、`write_file` / `bash`
+（写入与执行，均限制在 `--workdir` 沙箱内：路径解析锁定 root，bash 的 cwd 钉死 root）。
 
 要求 Node ≥ 23.6（原生运行 TypeScript）。每次运行的产物在 `runs/<时间戳>/`：
 `journal.jsonl`（append-only 事件日志）、`content/`（单一内容存储）、

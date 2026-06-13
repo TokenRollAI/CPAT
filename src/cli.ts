@@ -17,6 +17,7 @@ function usage(): never {
 Usage:
   node src/cli.ts run "<task>" [options]
   node src/cli.ts run --demo [options]
+  node src/cli.ts tui
 
 Options:
   --workdir <dir>      Tool sandbox root (default: cwd)
@@ -79,6 +80,20 @@ function parseArgs(argv: string[]): { task: string; config: CpatConfig; workdir:
 }
 
 async function main(): Promise<void> {
+  if (process.argv[2] === "tui") {
+    // Guarantee UTF-8 rendering for CJK/multibyte text without the user having
+    // to configure their shell. blessed reads the locale env at import time, so
+    // these defaults must be set before the dynamic import below. We only fill
+    // in a UTF-8 default when the env is missing or non-UTF-8; an explicit
+    // UTF-8 locale set by the user is left untouched.
+    const isUtf8 = (v?: string) => !!v && /utf-?8/i.test(v);
+    if (!isUtf8(process.env.LC_ALL) && !isUtf8(process.env.LANG) && !isUtf8(process.env.LC_CTYPE)) {
+      process.env.LANG = "en_US.UTF-8";
+      process.env.LC_ALL = "en_US.UTF-8";
+    }
+    await import("./tui.ts");
+    return;
+  }
   const { task, config, workdir } = parseArgs(process.argv.slice(2));
   const env = loadDeepSeekEnv();
   const client = new DeepSeekClient(env);
@@ -95,9 +110,10 @@ async function main(): Promise<void> {
       const cache = t.promptTokens > 0 ? ` cache ${Math.round((100 * t.cacheHitTokens) / t.promptTokens)}%` : "";
       const tools = t.toolCalls.length ? `  → ${t.toolCalls.join(", ")}` : "  → final answer";
       const patch = t.patchSummary ? `  [patch: ${t.patchSummary}]` : "";
+      const nudge = t.nudged ? "  [governance nudge]" : "";
       const fallback = t.fallbackOffloads > 0 ? ` (runtime offloaded ${t.fallbackOffloads})` : "";
       const pressure = t.pressure !== "ok" ? `  ⚠ ${t.pressure}${fallback}` : "";
-      console.log(`turn ${String(t.turn).padStart(2)}: ${t.promptTokens} in${cache} / ${t.completionTokens} out${pressure}${tools}${patch}`);
+      console.log(`turn ${String(t.turn).padStart(2)}: ${t.promptTokens} in${cache} / ${t.completionTokens} out${pressure}${tools}${patch}${nudge}`);
     },
   });
 

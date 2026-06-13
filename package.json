@@ -9,12 +9,18 @@
   },
   "scripts": {
     "start": "node src/cli.ts",
+    "tui": "node src/cli.ts tui",
     "demo": "node src/cli.ts run --demo",
-    "test": "node --test test/*.test.ts",
+    "bench": "node bench/longbench.ts",
+    "test": "node --test test/*.test.ts bench/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/blessed": "^0.1.27",
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "blessed": "^0.1.81"
   }
 }

@@ -1,11 +1,14 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import type { ToolDefinition } from "../types.ts";
 
 /**
- * Deliberately simple read-only task tools for the experiment. grep_search and
- * read_file can produce large raw payloads — exactly the blocks the agent
- * should learn to payload_offload under budget pressure.
+ * Simple task tools for the experiment. grep_search and read_file can produce
+ * large raw payloads — exactly the blocks the agent should learn to
+ * payload_offload under budget pressure. write_file and bash add mutation:
+ * both are confined to the workdir sandbox (paths resolved under root, bash
+ * cwd pinned to root).
  */
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "runs", ".llmdoc-tmp", "dist", "build"]);
@@ -58,6 +61,38 @@ export const taskToolDefs: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "write_file",
+      description:
+        "Write a text file (overwrites if it exists, creates parent dirs). Path is relative to the workdir root and cannot escape it.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "File path relative to the workdir root." },
+          content: { type: "string", description: "Full file contents to write." },
+        },
+        required: ["path", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "bash",
+      description:
+        "Run a shell command. The working directory is pinned to the workdir root; the command itself is unrestricted, so prefer scoped, non-destructive commands.",
+      parameters: {
+        type: "object",
+        properties: {
+          command: { type: "string", description: "Shell command to execute." },
+          timeout_ms: { type: "number", description: "Max run time in ms (default 30000)." },
+        },
+        required: ["command"],
+      },
+    },
+  },
 ];
 
 export class TaskTools {
@@ -89,6 +124,10 @@ export class TaskTools {
           );
         case "grep_search":
           return this.grep(String(args.pattern), String(args.path ?? "."));
+        case "write_file":
+          return this.writeFile(String(args.path), String(args.content ?? ""));
+        case "bash":
+          return this.bash(String(args.command), args.timeout_ms === undefined ? 30_000 : Number(args.timeout_ms));
         default:
           return `error: unknown tool "${name}"`;
       }
@@ -159,6 +198,34 @@ export class TaskTools {
     };
     walk(this.safePath(path));
     return truncate(out.join("\n") || "(no matches)");
+  }
+
+  private writeFile(path: string, content: string): string {
+    const abs = this.safePath(path);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, content, "utf8");
+    return `wrote ${relative(this.root, abs)} (${Buffer.byteLength(content, "utf8")} bytes)`;
+  }
+
+  private bash(command: string, timeoutMs: number): string {
+    try {
+      const out = execSync(command, {
+        cwd: this.root,
+        timeout: timeoutMs,
+        encoding: "utf8",
+        maxBuffer: 10_000_000,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      return truncate(out.trim() || "(no output)");
+    } catch (err) {
+      const e = err as { stdout?: string; stderr?: string; status?: number; message?: string };
+      const parts = [
+        e.stdout?.trim() ? `stdout:\n${e.stdout.trim()}` : "",
+        e.stderr?.trim() ? `stderr:\n${e.stderr.trim()}` : "",
+        `exit: ${e.status ?? "n/a"}${e.message ? ` (${e.message})` : ""}`,
+      ].filter(Boolean);
+      return truncate(parts.join("\n"));
+    }
   }
 }
 
