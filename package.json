@@ -1,0 +1,20 @@
+{
+  "name": "cpat",
+  "version": "0.1.0",
+  "description": "CPAT — Context Patch as Tool. Agent-driven context maintenance protocol, prototyped on DeepSeek.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "start": "node src/cli.ts",
+    "demo": "node src/cli.ts run --demo",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
