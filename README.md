@@ -1,118 +1,121 @@
 # CPAT — Context Patch as Tool
 
-基于 DeepSeek 的最小原型：让 agent 通过一个受控的 `context_update` 工具，对自己的可见
-context blocks 提交原子 patch，由 runtime 校验后应用到下一轮 context view。
+让 agent 通过一个受校验的 `context_update` 工具，对自己的可见 context blocks 提交原子 patch。
+**核心命题**：上下文管理从被动阈值压缩，变成 agent 的**主动、可逆决策**——runtime 只发预算压力信号，
+选择压缩/卸载/恢复哪些 block 的是 agent 自己。原型基于 DeepSeek，零运行时依赖（TUI 除外）。
 
-核心命题：**context 管理从被动阈值压缩变成 agent 的主动决策**。runtime 只发出
-budget 压力信号；选择对哪些 block 做 compact / payload offload / archive 的是 agent 自己。
+## 这一次研究证明了什么
+
+CPAT 是为**受限窗口下的超长程 agent**设计的。在一个固定上下文窗口里、面对远超窗口的语料、跨数十轮的
+深度研究任务上，三对照臂（自建数据集，详见 [`research/`](research/)）：
+
+| 窗口 | 臂 | 提前终止 | 准确率 | 总 prompt tokens |
+|---|---|:---:|:---:|---:|
+| 32K | ReAct（无治理） | ✗ 是 | **0%** | 31,740 |
+| 32K | threshold（被动压缩） | 否 | 100% | 305,434 |
+| 32K | CPAT（主动治理） | 否 | 100% | 464,041 |
+| 200K | ReAct（无治理） | ✗ 是 | **8.3%** | 714,175 |
+| 200K | threshold（被动压缩） | 否 | 100% | **2,819,420** |
+| **200K** | **CPAT（主动治理）** | 否 | **100%** | **488,333** |
+
+两个结论：
+
+1. **治理 ≫ 不治理**：受限窗口下 ReAct 因上下文耗尽**提前终止**而彻底失败（0% / 8.3%）；任何治理都能 100% 完成。
+2. **大窗口下主动 CPAT 碾压被动压缩**：200K 时同样 100% 准确率，CPAT 只花 **49 万** token，threshold 花 **282 万**——**省 83%**。
+   机制：threshold 被动等 context 涨满才压（每轮都背着近满窗口）；CPAT 主动读完即 offload（context 始终压在 25K）。
+   **窗口越大，CPAT 优势越明显。**
+
+诚实边界：32K 小窗口下 CPAT 反而比 threshold 贵（主动治理的 LLM 往返开销只有大窗口才回本）；
+`restore` 的独立价值尚未验证（静态文件可重读时 re-read 永远够用）。完整研究档案见 [`research/`](research/)。
+
+> 之所以前期实验（用百万真实窗口）测不出价值：ReAct 永不溢出。唯一变量是"窗口是否受限"。
+> 这与 CAT 论文（[arXiv:2512.22087](https://arxiv.org/abs/2512.22087)）的范式一致。
 
 ## 快速开始
 
 ```bash
-# .env 提供 OPENAI_BASE_URL 与 API_KEY（DeepSeek 的 OpenAI 兼容端点）
-cp .env.example .env
+cp .env.example .env   # 填 OPENAI_BASE_URL 与 API_KEY（DeepSeek 的 OpenAI 兼容端点）
 
-npm install          # blessed（TUI）为唯一运行时依赖，其余仅 dev
-npm test             # 离线测试 patch 引擎（不调 API）
-npm run demo         # 内置仓库分析任务，小预算强制触发 budget 压力
-npm run tui          # 交互式 TUI：表单设置 max-context/模型/任务，实时显示每轮日志
+npm install            # blessed（TUI）为唯一运行时依赖，其余仅 dev
+npm test               # 26 个离线测试（patch 引擎 + agent 循环 + F1，全程不调 API）
+npm run typecheck      # tsc --noEmit
 
-# 自定义任务
-node src/cli.ts run "你的任务" --workdir <目录> --max-context 16000 --model deepseek-v4-flash
+# 跑一个自定义任务（受限窗口下治理你自己的上下文）
+node src/cli.ts run "你的任务" --workdir <目录> --max-context 32000 --model deepseek-v4-pro
+
+# 跑有效性对照实验（自建深度研究数据集，三臂之一）
+npm run bench -- --mode cpat --hard-window 200000 --docs 40 --questions 12
 ```
 
-任务工具：`list_dir` / `read_file` / `grep_search`（只读）、`write_file` / `bash`
-（写入与执行，均限制在 `--workdir` 沙箱内：路径解析锁定 root，bash 的 cwd 钉死 root）。
+要求 Node ≥ 23.6（原生运行 TypeScript）。每次运行产物落在 `runs/<时间戳>/`：
+`journal.jsonl`（append-only 事件日志）、`content/`（单份内容存储）、`metrics.json`、`answer.md`。
 
-要求 Node ≥ 23.6（原生运行 TypeScript）。每次运行的产物在 `runs/<时间戳>/`：
-`journal.jsonl`（append-only 事件日志）、`content/`（单一内容存储）、
-`metrics.json`、`answer.md`。
-
-## 数据模型（与设计文稿的对应及偏差）
+## 心智模型
 
 ```
-ContentStore   每个 payload 进入系统时只存一次，键为 <blockId>@v<version>，
-               artifact://<key> 是唯一找回通道
+ContextBlock   可寻址、可 patch 的工作态单元（id / kind / visibility / content）
+ContextView    按可见性过滤、按 block 顺序渲染的下一轮消息列表
+ContentStore   每个 payload 只存一次，键 <blockId>@v<version>；artifact://<key> 是唯一恢复通道
 Journal        append-only 事件日志（ingest / patch / llm_call），只记元数据与内容键
-ContextBlock   可 patch 的工作状态，按 id 寻址（src/types.ts）
-ContextView    下一次 LLM 调用真正渲染的 block 列表
 ```
 
-相对设计文稿的两个核心调整（讨论后决定）：
+**`payload_offload` 是零拷贝视图翻转**（block 的 content 从 inline string 翻成 ArtifactRef，payload 仍在原键下），
+**`restore` 是其逆操作**（把全文从 ContentStore 回填为 inline）。详细设计见 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
 
-1. **单一内容存储取代「raw log 全文 + artifact store 拷贝」**。原设计同一 payload 会存三份
-   （raw log、block、offload 后的 artifact）。现在 payload 只存一次；`payload_offload`
-   是纯视图层操作——block 从「内联渲染」切换为「渲染 ArtifactRef」，**零拷贝**、瞬时完成。
-   append-only 的溯源语义由 Journal 承担。
-2. **offload 不改变 block 的 kind**。kind 表示块「是什么」（tool_result 等），是否 offload
-   是存储形态（content 是否为 ArtifactRef）。这是一次真实 API 400 的回归修复：offload 后的
-   tool result 仍渲染为 `role:"tool"` 消息，必须保持 tool-call chain 成员身份。
+## context_update 的 8 个原子操作
 
-## 协议流程
+默认启用 6 个，gated 2 个（`--allow-replace` / `--allow-redact` 开启）。完整语义、字段、校验规则见
+[`ARCHITECTURE.md`](ARCHITECTURE.md)。
 
-1. 每条 user / assistant / tool 消息进入系统即成为 block（id、kind、token 数、description）。
-2. 每轮调用的消息列表 = block 顺序渲染（带 `[block:<id>]` 标签）+ 易变尾部
-   （`<context_manifest>` 每轮重建，不落库——稳定 prefix 在前、变化集中在尾部，配合
-   DeepSeek context caching）。
-3. budget 压力阶梯（按下一轮 view 的校准估算）：
-   - **70% soft**：注入 `budget_report` block（最大块 + 建议操作 + 必须保留项）；agent 收窄新探索，通常等边界 pass 整理已消化内容。
-   - **80% must_act**：普通任务回合应避免 broad task tools，必要时提交最小 `context_update` 或明确 `no_context_update_needed`。
-   - **95% critical**：runtime 兜底，强制 offload 最大的内联 tool results（≥300 tokens）。
-4. `context_update` 是事务：任一 operation 被拒则整体不生效，rejection 消息返回给 agent 重试。它现在主要作为**边界维护工具**使用：当前任务 loop 结束后、下一条 user message 进入后，runtime 会在 followup 前给 CPAT agent 一次只允许 `context_update` 的 ephemeral pass；可提交真实 patch，也可用空 `operations: []` 表示不值得改写 context。
-5. 维护提示、manifest 等易变内容放在尾部且不落为长期 block，避免 Context Update 自身污染 stable prefix；但真实 patch 仍会改写 block 视图，因此应优先 tail-local、可逆、收益明确的 archive/offload，谨慎 compact 早期高复用内容。
-6. DeepSeek thinking mode 的 `reasoning_content`：tool call 链未闭合时作为 `api_required`
-   的 `reasoning_trace` block 随 assistant 消息回传（API 协议要求），链闭合后 runtime 自动释放。
-   agent 的语义 patch 永远不影响 API 回放所需字段。
+| op | 作用 | 可逆性 |
+|---|---|---|
+| `set_visibility` | archive（留 manifest 可恢复）/ hidden（彻底移出）/ model（恢复） | 高 |
+| `payload_offload` | 大 tool_result → 短摘要 + artifact 引用，零拷贝 | 高（restore） |
+| `restore` | 把已 offload 的 payload 全文回填（offload 的逆操作） | — |
+| `compact` | 一组完成的探索 → 一个 dense summary（源块归档） | 中 |
+| `fold` | 一段**连续**子任务轨迹 → 一个 scoped summary | 中 |
+| `merge` | 2+ 重叠/重复块 → 一个 canonical 块（update / contradiction） | 中 |
+| `replace`(gated) | 改写非 protected 块内容 | 低 |
+| `redact`(gated) | 删除 inline JSON tool_result 的字段 | 低 |
 
-## 操作与校验规则
+事务式：任一 op 被拒则整体不生效，rejection 返回给 agent 重试。关键护栏：tool-call chain 必须整体 patch
+（`chain_atomicity`）；**当前问题与 task_state 不可被 compact/fold/merge 吞掉**（`protected_current_question` /
+`protected_state`，防语义漂移）。
 
-MVP 默认启用 `compact` / `payload_offload` / `set_visibility`；`replace` / `redact`
-按阶段计划默认关闭（`--allow-replace` / `--allow-redact` 开启）。
+## 三对照臂与受限窗口
 
-校验规则（`src/runtime/patch.ts`）：
+`runAgent` 的 `mode`（`src/agent/loop.ts`）：
 
-| 规则 | 含义 |
-| --- | --- |
-| `protected_kind` | system prompt、budget report、api_required 块不可 patch |
-| `replace_protected` | user 原文只能 summarize/archive，不可改写 |
-| `protected_hidden` | protected 块不可 hidden（archive 可恢复，hidden 不列 manifest） |
-| `offload_replacement` | offload 必须留下 description + summary + retrieval_hint |
-| `compact_policy` | compact 必须声明 preserve / drop |
-| `chain_atomicity` | tool-call chain（assistant 头 + 全部 tool results，含已 offload 的）必须整体 patch，否则下一轮 API 会 400 |
+- **`react`**：只有任务工具，无治理工具、无 runtime 安全网；context 纯累积。超过 `hardWindowTokens` 即**提前终止**（复现论文"窗口耗尽→对话终止"）。
+- **`threshold`**：有 runtime 安全网（超阈值自动 offload 最大 tool_result）但**不给 agent context_update 工具**——被动压缩。
+- **`cpat`**：完整主动治理——context_update 工具 + 压力阶梯 + 边界维护 pass + 软强制。
 
-所有 patch（agent 与 runtime 兜底）写入 journal，可完整重放。
-
-## 实验假设与指标
-
-- **H1** agent 自选 patch 比阈值压缩更能保留任务相关信息
-- **H2** block 级 payload offload 比 append-only raw tool results 的 token 成本与干扰更低
-- **H3** stable prefix + patchable tail 更好利用 DeepSeek context caching
-- **H4** 收益不只是避免超窗，而是减少 semantic drift / duplicate context / obsolete reasoning
-
-`metrics.json` 字段：prompt/completion tokens、cache 命中（`prompt_cache_hit_tokens`）、
-agent patch 真实应用/空操作/被拒数、runtime 兜底次数、边界维护 pass 次数（`boundary_maintenance_calls`）、
-各 op 计数、释放 token 数、最终可见 block 状态。
-对比基线时关注 `agent_patches_applied` 与 `runtime_fallback_offloads` 的比例——
-后者占比高说明 agent 治理不及时，退化成了被动压缩。
-
-实验注意：`--max-context` 故意压小（如 12k）才能频繁触发压力；预算越小 patch 越频繁，
-prefix 改写越多，cache 命中率越低——H3 需要在更接近真实的预算下测。token 估算是
-启发式（中英文系数），按 API 实际 `prompt_tokens` 在线校准。
+预算压力阶梯（70% soft / 80% must_act / 95% critical runtime 兜底）。`hardWindowTokens` 模拟固定窗口，
+是测出 CPAT 价值的关键——窗口必须受限，ReAct 才会"崩"。
 
 ## 代码结构
 
 ```
 src/types.ts               全部协议类型（block / operation / journal / config）
-src/util/env.ts            .env 解析（OPENAI_BASE_URL + API_KEY）
-src/util/misc.ts           token 估算、id 生成
-src/deepseek/client.ts     OpenAI 兼容客户端（strict tools 失败自动降级）
-src/runtime/stores.ts      ContentStore（单一拷贝）+ Journal（append-only）
-src/runtime/blocks.ts      BlockStore：寻址、排序、chain 识别、ingestion
-src/runtime/patch.ts       校验器 + 事务式 applier（CPAT 核心）
+src/runtime/stores.ts      ContentStore（单份）+ Journal（append-only）
+src/runtime/blocks.ts      BlockStore：寻址、排序、chainOf 链识别、ingestion
+src/runtime/patch.ts       校验器 + 事务式 applier（CPAT 核心，8 op + 护栏）
 src/runtime/view.ts        消息渲染、manifest、budget report 构建
-src/runtime/runtime.ts     ContextRuntime 总控：budget 监控、兜底、journal 记账
+src/runtime/runtime.ts     ContextRuntime 总控：budget 监控、critical 兜底、journal 记账
 src/agent/contextTool.ts   context_update / artifact_get 的 tool schema 与归一化
-src/agent/taskTools.ts     沙箱化任务工具（list_dir / read_file / grep_search）
-src/agent/loop.ts          agent 主循环、系统提示词、指标收集
-src/cli.ts                 CLI 入口与 demo 任务
+src/agent/taskTools.ts     沙箱化任务工具（list_dir / read_file / grep_search / write_file / bash）
+src/agent/loop.ts          agent 主循环、三臂、硬窗口、三层提示、指标收集
+src/deepseek/client.ts     OpenAI 兼容客户端（strict tools 失败自动降级）
+src/cli.ts                 CLI 入口 + TUI 分发
+bench/deepresearch.ts      自建深度研究数据集 + 三臂双扫 runner
+bench/f1.ts                LongBench 等价 token F1 / exact-match 判分
+research/                  论文级研究档案（问题、假设、CAT 对照、每次实验设计与结果）
+llmdoc/                    项目知识库（架构文档、decisions、reflections）
+ARCHITECTURE.md            context_update 工具的设计与实现详解
 ```
+
+## 文档导航
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — **context_update 怎么设计的**：8 个 op、数据模型、事务引擎、护栏、扩展指南。
+- [`research/`](research/) — 研究全过程（[研究日志](research/00-research-log.md)、[双扫结果](research/experiments/04-full-double-sweep.md)）。
+- [`llmdoc/`](llmdoc/) — 稳定项目知识（[核心概念](llmdoc/must/core-concepts.md)、[运行时](llmdoc/architecture/context-runtime.md)、decisions）。

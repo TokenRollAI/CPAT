@@ -14,7 +14,7 @@ CPAT 项目文档全局地图。启动必读顺序见 `llmdoc/startup.md`。
 
 - `architecture/context-runtime.md`：运行时核心深度文档——数据模型、ContentStore+Journal、chainOf、patch 事务引擎全部校验规则、预算监控、视图构建。
 - `architecture/agent-protocol.md`：agent 侧契约——三对照臂（cpat/react/threshold）+ 硬窗口、SYSTEM_PROMPT 三层提示、工具 schema 与归一化、任务工具沙箱、DeepSeek 客户端、主循环、指标语义（含 terminated_early/peak_view_tokens）、测试清单。
-- `architecture/benchmark-harness.md`：有效性验证子系统——三对照臂（`AgentMode`）+ 硬窗口/taskToolNames、连环多问（`followups`）、`bench/` 四个 runner（longbench/multidoc/longloop/deepresearch）+ f1/exact-match 评分；指向 `research/` 双扫结果。
+- `architecture/benchmark-harness.md`：有效性验证子系统——三对照臂（`AgentMode`）+ 硬窗口/taskToolNames、连环多问（`followups`）、`bench/deepresearch.ts` runner（三臂双窗口）+ f1/exact-match 评分；早期 longbench/multidoc/longloop runner 已删，见 `research/` 历史；指向 `research/` 双扫结果。
 
 ## guides/ — 可重复工作流
 
@@ -38,6 +38,10 @@ CPAT 项目文档全局地图。启动必读顺序见 `llmdoc/startup.md`。
   - `2026-06-13-agent-passive-under-pressure.md`：H1 失效模式实证——agent 在 must_act 压力下不主动 patch，全靠 runtime 兜底。
   - `2026-06-13-cpat-vs-react-inconclusive.md`：五组实验后的最终结论——CPAT 未证明任务质量优于 ReAct(稳定省 token 35-57%,F1 无一致优势);longloop 25 万收官数据 + ReAct append-only 在纯累积长任务上 cache 反更优(修正旧说法)+ restore 价值仍是开放问题。
   - `2026-06-14-context-update-boundary-maintenance.md`：用户反馈后的协议修正——`context_update` 从 must_act 插队治理转为 user-message / task-loop 边界维护；no-op 单独计数，避免污染真实 patch 指标。
+
+## 根目录文档
+
+- `README.md`、`ARCHITECTURE.md`（项目根，非 llmdoc）。其中 `ARCHITECTURE.md` 详解 `context_update` 工具的设计与实现，可作为 `must/core-concepts.md` 与 `architecture/context-runtime.md` 的面向读者补充。
 
 ## 约定
 

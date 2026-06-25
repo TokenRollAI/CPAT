@@ -2,6 +2,8 @@
 
 CPAT 是否真的优于无治理的标准 agent？这个子系统提供对照实验能力：一个 **ReAct 对照臂** + **连环多问** + 独立的 `bench/` runner。代码分两处：核心改动在 `src/agent/loop.ts`（AgentMode、followups），其余全在 `bench/`（独立模块，只 import `src/`，不改核心运行时）。运行时核心见 `llmdoc/architecture/context-runtime.md`，agent 协议见 `llmdoc/architecture/agent-protocol.md`。
 
+> **当前 `bench/` 组成**：经代码整理后，`bench/` 只含 `deepresearch.ts`（当前唯一活跃 runner）+ `f1.ts`（评分纯函数）+ `f1.test.ts`（评分单测）。早期的 `longbench.ts` / `multidoc.ts` / `longloop.ts` 三个 runner 对应被范式修正推翻的前五组百万窗口实验，已删除；其设计与结果保留于 `research/` 档案与 `llmdoc/memory/` 历史记录。
+
 > 价值验证的场景约束（语料须超工作窗口数倍 + 信息不可 grep 跳过 + 有回访模式）见 `llmdoc/memory/decisions/0005-cpat-value-requires-superwindow-scale.md`。前五组（百万窗口）的最终结论见 `0006-reposition-cpat-as-cost-optimization.md`；**受限窗口范式重做后的决定性突破**（治理>不治理两窗口成立、200K 下主动 CPAT 省 83% token）见 `0007-bounded-window-cpat-value.md` 与 `research/00-research-log.md`（阶段 2-6）。
 
 ## 1. 三对照臂（`src/agent/loop.ts` `AgentMode`）
@@ -27,7 +29,7 @@ CPAT 是否真的优于无治理的标准 agent？这个子系统提供对照实
 
 ## 3. `bench/` runner 与评分
 
-全部为独立可执行模块（顶层 `main().catch(...)`），从项目根运行(读 `.env`),落盘 `runs/<prefix>-<ISO时间戳>/`(含每样本 corpus + `results.json`)。tsconfig `include` 已含 `bench/**/*.ts`;`package.json` 的 `"bench"` script 指向 `longbench.ts`。
+全部为独立可执行模块（顶层 `main().catch(...)`），从项目根运行(读 `.env`),落盘 `runs/<prefix>-<ISO时间戳>/`(含每样本 corpus + `results.json`)。tsconfig `include` 已含 `bench/**/*.ts`;`package.json` 的 `"bench"` script 指向 `deepresearch.ts`（`node bench/deepresearch.ts`）。当前 `bench/` 只含 `deepresearch.ts` + `f1.ts` + `f1.test.ts`。
 
 ### `bench/f1.ts` — 评分（纯函数,零依赖）
 
@@ -35,25 +37,19 @@ LongBench v1 等价 token F1,忠实复刻其 `metrics.py`:
 
 - `normalizeAnswer`:小写 → 去 ASCII 标点 → 去冠词 a/an/the → 折叠空白。
 - `qaF1Score(prediction, groundTruths[])`:对每个参考算 token-multiset F1,取最大值,返回 `[0,1]`(报告时 ×100)。
-- 由 `bench/f1.test.ts`(6 个离线单测)守护:精确匹配=1、完全不匹配=0、部分重叠严格介于、归一化、多参考取 max、空输入=0。注:`npm test` 只 glob `test/*.test.ts`,该测试经 `node bench/f1.test.ts` 直接跑。
+- 由 `bench/f1.test.ts`(6 个离线单测)守护:精确匹配=1、完全不匹配=0、部分重叠严格介于、归一化、多参考取 max、空输入=0。注:`npm test` 的 glob 已含 `bench/*.test.ts`(`node --test test/*.test.ts bench/*.test.ts`),该测试随 `npm test` 一起跑。
 
-### `bench/longbench.ts` — 单文档 QA runner
+### 历史 runner（已删除）— longbench / multidoc / longloop
 
-LongBench v1 单文档 QA(multifieldqa_en / narrativeqa / qasper)。把单篇长文落 `corpus/document.txt`,agent 用 read_file/grep 读后作答,F1 判分。flags:`--data`(必填 jsonl)、`--n`(默认 5)、`--mode cpat|react`、`--model`(默认 deepseek-v4-pro)、`--max-context`(默认 50000)、`--turns`(默认 30)。summary 报告 avg_f1 / avg_prompt_tokens / avg_cache_hit_ratio / agent_patches vs runtime_fallbacks。
+早期曾有三个 runner，对应被范式修正推翻的前五组百万窗口实验，**已从 `bench/` 删除**：
 
-### `bench/multidoc.ts` — 多文档检索 runner
+- `bench/longbench.ts` — 单文档 QA runner（LongBench v1）。
+- `bench/multidoc.ts` — 多文档检索 runner（1 gold + k 干扰、gold 位置轮转防偏置）。
+- `bench/longloop.ts` — 长程连环多问 runner（大语料 + `followups` 连续多问，曾实跑 25 万级语料收官）。
 
-N 篇长文档(1 篇 gold + k 篇干扰)拼成 corpus,答案只在 gold 篇,**gold 位置轮转**(`buildCorpus` 的 `goldSlot = target % (k+1)`,无 RNG、resume-safe)防位置偏置;任务强制跨文件 `list_dir`/`grep_search`/`read_file` 定位。flags 同 longbench,另加 `--distractors`(默认 4),`--max-context` 默认 60000。设计意图:理论上 ReAct 会累积每篇读过的文档(被干扰项稀释),CPAT 可 offload 已排除的文档。
+诊断出「百万窗口让 ReAct 永不溢出」是范式错误后，这三个 runner 被 `deepresearch.ts` 取代。其设计动机、flags 与实验结果保留于 `research/` 档案、decision `0005`/`0006` 及 `llmdoc/memory/reflections/` —— 这些是研究史，不在本文档复述。
 
-### `bench/longloop.ts` — 长程连环多问 runner（CPAT 的目标场景）
-
-大语料(`loadUniqueBooks` 按开头 300 字去重 narrativeqa,默认 20 本书 ~500k token,远超工作预算)+ 连续 M 问(`scheduleQuestions` 跨语料散布并**保证至少一次回访**:末问重访首篇)。用 `runAgent` 的 `followups` 在**同一 runtime** 上吞吐,逐问 F1。task 文本显式引导:读完暂不用的文档 `payload_offload`(而非 compact,保留全文供回访逐字重读)、后续问题需要时 restore/artifact_get 取回。
-
-显式上报 `ops_by_type.payload_offload` / `restore` 计数(衡量**可逆吞吐**这条 CPAT 独有路径)、token 吞吐、`api_error`(ReAct 在 ~500k 语料上可能撑爆真实窗口→ API 400,被捕获记录而非崩溃)。这是单文档/多文档 runner **无法**制造的场景:信息一次装不进预算、且回访让 offload→restore 成为承重路径。
-
-**已实跑(2026-06-14)**:25 万级配置(实测 ~30.7 万 token 语料、6 连环问)已在 cpat/react 双臂上跑完,是有效性验证的收官实验。结果支撑了 CPAT 重定位结论——即便 5.1 倍语料,restore 仍为 0、ReAct 未撑爆(`api_error`=0),CPAT 只省 token 不提质量。不在此展开数据,详见 reflection `2026-06-13-cpat-vs-react-inconclusive.md` 与 decision `0006-reposition-cpat-as-cost-optimization.md`。
-
-### `bench/deepresearch.ts` — 受限窗口深度研究 runner（自建数据集，决定性场景）
+### `bench/deepresearch.ts` — 受限窗口深度研究 runner（自建数据集，当前唯一活跃 runner）
 
 诊断出前五组是范式错误（百万窗口让 ReAct 永不溢出）后新建。合成 dossier 语料（每篇含 codename / lead researcher / 精确 accuracy / dependency / Incident Log），`runAgent` 的 `followups` 连环问 12 个，全部**精确匹配判分**（`exactMatch` 复用 `f1.ts` 的 `normalizeAnswer`，gold 答案作为 prediction 的 token-substring 命中）。问题四类交织：`aggregate`（跨全部 dossier 求最高/最低/计数，强制读全部）、`cross`（跨文档依赖链）、`direct`、`revisit`（回访早期 dossier 深处的 incident code）。flags：`--mode react|threshold|cpat`（必填）、`--hard-window`（默认 200000）、`--docs`（默认 30）、`--questions`（默认 12）、`--doc-tokens`、`--turns`、`--model`（默认 deepseek-v4-pro）。落盘 `runs/deepresearch-<mode>-w<window>-<ts>/`（含 corpus + `results.json`），上报 `accuracy` / `terminated_early` / `peak_view_tokens` / `off/res/comp` 计数 / `fallbacks`。
 
