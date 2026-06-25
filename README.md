@@ -120,3 +120,7 @@ ARCHITECTURE.md            context_update 工具的设计与实现详解
 - [`ARCHITECTURE.md`](https://github.com/TokenRollAI/CPAT/blob/main/ARCHITECTURE.md) — **context_update 怎么设计的**：8 个 op、数据模型、事务引擎、护栏、扩展指南。
 - [`research/`](https://github.com/TokenRollAI/CPAT/tree/main/research) — 研究全过程（[研究日志](https://github.com/TokenRollAI/CPAT/blob/main/research/00-research-log.md)、[双扫结果](https://github.com/TokenRollAI/CPAT/blob/main/research/experiments/04-full-double-sweep.md)）。
 - [`llmdoc/`](https://github.com/TokenRollAI/CPAT/tree/main/llmdoc) — 稳定项目知识（[核心概念](https://github.com/TokenRollAI/CPAT/blob/main/llmdoc/must/core-concepts.md)、[运行时](https://github.com/TokenRollAI/CPAT/blob/main/llmdoc/architecture/context-runtime.md)、decisions）。
+
+## 致谢
+
+- [Linux.do](https://linux.do) - 社区支持
