@@ -294,7 +294,7 @@ export interface CpatConfig {
   maxContextTokens: number;
   /** Fraction of max at which a budget_report block is injected (default 0.7). */
   softLimitRatio: number;
-  /** Fraction at which the agent must patch or explicitly decline (default 0.8). */
+  /** Fraction at which task turns should stay narrow and boundary maintenance is expected. */
   mustActRatio: number;
   /** Fraction at which the runtime force-offloads largest tool results (default 0.95). */
   criticalRatio: number;

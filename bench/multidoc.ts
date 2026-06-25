@@ -199,8 +199,10 @@ async function main(): Promise<void> {
       prompt_tokens: m.prompt_tokens,
       completion_tokens: m.completion_tokens,
       agent_patches_applied: m.agent_patches_applied,
+      agent_patches_noop: m.agent_patches_noop,
       runtime_fallback_offloads: m.runtime_fallback_offloads,
       governance_nudges: m.governance_nudges,
+      boundary_maintenance_calls: m.boundary_maintenance_calls,
       cache_hit_ratio: m.cache_hit_ratio,
       final_visible_tokens: m.final_visible_tokens,
     });

@@ -116,7 +116,7 @@ CPAT 运行时核心：数据模型、单份存储、patch 事务引擎、预算
 | 估算用量 | 压力 | 行为 |
 | --- | --- | --- |
 | ≥ 95% | `critical` | 先跑 `criticalFallback` 兜底，再重估，仍生成报告 |
-| ≥ 80% | `must_act` | agent 必须 patch 或显式回复 `no_context_update_needed` |
+| ≥ 80% | `must_act` | 普通任务回合应收窄探索；边界维护 pass 或临近溢出时提交最小 patch / 显式 no-op |
 | ≥ 70% | `soft` | 注入 budget_report，agent 自行决定 |
 | 其下 | `ok` | 不动作 |
 
@@ -130,9 +130,9 @@ CPAT 运行时核心：数据模型、单份存储、patch 事务引擎、预算
 
 ## 6. 视图构建（src/runtime/view.ts）
 
-**`buildMessages`**：遍历 `store.all()`，只渲染 `visibility==="model"` 的 block；消息顺序 = block 顺序；估算 = 各内容估算 + 每消息固定 4 token 开销。
+**`buildMessages`**：遍历 `store.all()`，只渲染 `visibility==="model"` 的 block；消息顺序 = block 顺序；估算 = 各内容估算 + 每消息固定 4 token 开销。可选 `ephemeralTailMessages` 会插在 manifest 前，供边界维护等**单次调用提示**使用，不创建 block、不写 ContentStore、不污染后续 stable prefix。
 
-**缓存友好原则（stable-prefix / volatile-tail）**：消息列表是只在 patch 处变动的**稳定前缀**；每轮易变内容（manifest、budget_report）集中在**尾部**，使前缀持续命中 DeepSeek context cache（实验假设 H3 的实现基础）。manifest **每轮重建、从不落为 block**（否则累积会破坏稳定前缀），作为最后一条 role:"user" 消息追加。
+**缓存友好原则（stable-prefix / volatile-tail）**：消息列表是只在 patch 处变动的**稳定前缀**；每轮易变内容（ephemeral tail、manifest、budget_report）集中在**尾部**，使前缀持续命中 DeepSeek context cache（实验假设 H3 的实现基础）。manifest **每轮重建、从不落为 block**（否则累积会破坏稳定前缀），作为最后一条 role:"user" 消息追加。经验修正：CPAT 治理不是 cache 恒优，频繁改写早期 prefix 会降低命中；因此边界维护提示要求优先 tail-local、可逆、收益明确的 patch。
 
 **`renderBlock` 渲染规则**（除 system_prompt 外均带 `[block:<id>]` 前缀标签，供 agent 在 manifest 与消息间对应 id）：
 

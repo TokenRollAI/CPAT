@@ -11,7 +11,7 @@
 
 ## 预算压力阶梯
 
-70% `soft`（注入 budget_report，agent 自决）→ 80% `must_act`（必须 patch 或回复 `no_context_update_needed`）→ 95% `critical`（runtime 兜底强制 offload ≥300 token 的 inline tool_result）。
+70% `soft`（注入 budget_report，agent 收窄新探索、等待边界维护）→ 80% `must_act`（普通任务回合避免 broad task tools；边界 pass 或临近溢出时最小 patch / `no_context_update_needed`）→ 95% `critical`（runtime 兜底强制 offload ≥300 token 的 inline tool_result）。
 
 ## 关键术语
 

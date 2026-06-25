@@ -483,3 +483,55 @@ test("fold collapses a contiguous range and rejects a non-contiguous set", () =>
   assert.match(folded.description, /folded scope: warm-up steps/);
 });
 
+
+test("compact cannot swallow the current question (semantic-drift guardrail)", () => {
+  const rt = makeRuntime();
+  rt.ingestSystem("sys");
+  rt.ingestUser("first question"); // answered, old
+  rt.ingestAssistant({ role: "assistant", content: "answer one" });
+  rt.ingestUser("CURRENT question"); // most recent user message = current question
+  const users = rt.blocks.all().filter((b) => b.kind === "user_message");
+  const oldUser = users[0];
+  const currentUser = users[users.length - 1];
+  const oldAssistant = rt.blocks.all().find((b) => b.kind === "assistant_message")!;
+
+  // compacting a range that INCLUDES the current question is rejected
+  const bad = rt.applyUpdate(
+    {
+      reason: "compact everything",
+      operations: [
+        {
+          op: "compact",
+          ids: [oldUser.id, oldAssistant.id, currentUser.id],
+          output: { description: "history", content: "we discussed things." },
+          preserve: ["facts"],
+          drop: ["chatter"],
+        },
+      ],
+    },
+    "agent",
+  );
+  assert.equal(bad.ok, false);
+  assert.ok(bad.rejections.some((r) => r.rule === "protected_current_question"));
+  // transactional: nothing changed, current question still visible
+  assert.equal(rt.blocks.get(currentUser.id)!.visibility, "model");
+
+  // compacting only the OLD (already-answered) turn is allowed
+  const ok = rt.applyUpdate(
+    {
+      reason: "compact finished turn",
+      operations: [
+        {
+          op: "compact",
+          ids: [oldUser.id, oldAssistant.id],
+          output: { description: "q1 summary", content: "Q1 was answered: answer one." },
+          preserve: ["q1 answer"],
+          drop: ["phrasing"],
+        },
+      ],
+    },
+    "agent",
+  );
+  assert.equal(ok.ok, true);
+  assert.equal(rt.blocks.get(currentUser.id)!.visibility, "model");
+});

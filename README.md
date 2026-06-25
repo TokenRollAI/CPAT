@@ -55,11 +55,12 @@ ContextView    下一次 LLM 调用真正渲染的 block 列表
    （`<context_manifest>` 每轮重建，不落库——稳定 prefix 在前、变化集中在尾部，配合
    DeepSeek context caching）。
 3. budget 压力阶梯（按下一轮 view 的校准估算）：
-   - **70% soft**：注入 `budget_report` block（最大块 + 建议操作 + 必须保留项）；agent 自行决定。
-   - **80% must_act**：agent 必须调用 `context_update` 或明确回复 `no_context_update_needed`。
+   - **70% soft**：注入 `budget_report` block（最大块 + 建议操作 + 必须保留项）；agent 收窄新探索，通常等边界 pass 整理已消化内容。
+   - **80% must_act**：普通任务回合应避免 broad task tools，必要时提交最小 `context_update` 或明确 `no_context_update_needed`。
    - **95% critical**：runtime 兜底，强制 offload 最大的内联 tool results（≥300 tokens）。
-4. `context_update` 是事务：任一 operation 被拒则整体不生效，rejection 消息返回给 agent 重试。
-5. DeepSeek thinking mode 的 `reasoning_content`：tool call 链未闭合时作为 `api_required`
+4. `context_update` 是事务：任一 operation 被拒则整体不生效，rejection 消息返回给 agent 重试。它现在主要作为**边界维护工具**使用：当前任务 loop 结束后、下一条 user message 进入后，runtime 会在 followup 前给 CPAT agent 一次只允许 `context_update` 的 ephemeral pass；可提交真实 patch，也可用空 `operations: []` 表示不值得改写 context。
+5. 维护提示、manifest 等易变内容放在尾部且不落为长期 block，避免 Context Update 自身污染 stable prefix；但真实 patch 仍会改写 block 视图，因此应优先 tail-local、可逆、收益明确的 archive/offload，谨慎 compact 早期高复用内容。
+6. DeepSeek thinking mode 的 `reasoning_content`：tool call 链未闭合时作为 `api_required`
    的 `reasoning_trace` block 随 assistant 消息回传（API 协议要求），链闭合后 runtime 自动释放。
    agent 的语义 patch 永远不影响 API 回放所需字段。
 
@@ -89,7 +90,8 @@ MVP 默认启用 `compact` / `payload_offload` / `set_visibility`；`replace` / 
 - **H4** 收益不只是避免超窗，而是减少 semantic drift / duplicate context / obsolete reasoning
 
 `metrics.json` 字段：prompt/completion tokens、cache 命中（`prompt_cache_hit_tokens`）、
-agent patch 应用/被拒数、runtime 兜底次数、各 op 计数、释放 token 数、最终可见 block 状态。
+agent patch 真实应用/空操作/被拒数、runtime 兜底次数、边界维护 pass 次数（`boundary_maintenance_calls`）、
+各 op 计数、释放 token 数、最终可见 block 状态。
 对比基线时关注 `agent_patches_applied` 与 `runtime_fallback_offloads` 的比例——
 后者占比高说明 agent 治理不及时，退化成了被动压缩。
 

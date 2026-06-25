@@ -273,8 +273,10 @@ async function main(): Promise<void> {
     offloads: (ops.payload_offload ?? 0) as number,
     restores: (ops.restore ?? 0) as number,
     agent_patches_applied: m?.agent_patches_applied ?? 0,
+    agent_patches_noop: m?.agent_patches_noop ?? 0,
     runtime_fallback_offloads: m?.runtime_fallback_offloads ?? 0,
     governance_nudges: m?.governance_nudges ?? 0,
+    boundary_maintenance_calls: m?.boundary_maintenance_calls ?? 0,
   };
 
   console.log(`\n=== per-question F1 (mode=${args.mode}) ===`);

@@ -36,6 +36,7 @@ CPAT 项目文档全局地图。启动必读顺序见 `llmdoc/startup.md`。
 - `memory/reflections/`：reflector 维护。
   - `2026-06-13-agent-passive-under-pressure.md`：H1 失效模式实证——agent 在 must_act 压力下不主动 patch，全靠 runtime 兜底。
   - `2026-06-13-cpat-vs-react-inconclusive.md`：五组实验后的最终结论——CPAT 未证明任务质量优于 ReAct(稳定省 token 35-57%,F1 无一致优势);longloop 25 万收官数据 + ReAct append-only 在纯累积长任务上 cache 反更优(修正旧说法)+ restore 价值仍是开放问题。
+  - `2026-06-14-context-update-boundary-maintenance.md`：用户反馈后的协议修正——`context_update` 从 must_act 插队治理转为 user-message / task-loop 边界维护；no-op 单独计数，避免污染真实 patch 指标。
 
 ## 约定
 

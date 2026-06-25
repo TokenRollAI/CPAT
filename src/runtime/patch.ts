@@ -79,6 +79,27 @@ export function applyContextUpdate(
     description: string,
     contentText: string,
   ): boolean => {
+    // Guardrail against semantic drift: compact/fold/merge must NOT swallow the
+    // live conversational state — the current question and any task_state block.
+    // Folding the active user_message into a lossy summary makes the agent lose
+    // track of what it is answering (observed: it replied "no new question
+    // received" after compacting the question away). The most recent
+    // user_message is treated as the current question and is off-limits.
+    let lastUserId: string | undefined;
+    for (const id of store.order) {
+      const b = store.get(id);
+      if (b && b.kind === "user_message") lastUserId = id;
+    }
+    for (const b of targets) {
+      if (b.kind === "task_state") {
+        reject(i, "protected_state", `block "${b.id}" is task_state and cannot be collapsed into a summary; archive or restore it instead`);
+        return false;
+      }
+      if (b.id === lastUserId) {
+        reject(i, "protected_current_question", `block "${b.id}" is the current question (most recent user message) and cannot be collapsed; it must stay verbatim so you do not lose track of what you are answering`);
+        return false;
+      }
+    }
     for (const b of targets) {
       if (b.visibility === "hidden") {
         reject(i, "hidden_target", `block "${b.id}" is hidden; restore it first`);

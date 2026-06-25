@@ -1,0 +1,10 @@
+===== v3 RE-RUN cpat ONLY (with semantic-drift guardrail), 32K, 20 docs, buried-fact =====
+  Q 8 revisit ✓ gold="INC-1000A"  pred: The incident code recorded in Aurora's incident lo
+  Q 9 revisit ✓ gold="INC-4644E"  pred: The incident code in Ember's Incident Log is **INC
+terminated_early   : false
+questions answered : 10/10
+accuracy           : 100%   (revisit: 100%)
+peak view tokens   : 19073  (window 32000)
+total prompt tokens: 318987  turns: 20
+offload/restore/compact: 21/0/0  fallbacks: 15
+===== DONE =====

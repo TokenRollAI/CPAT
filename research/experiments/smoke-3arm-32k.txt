@@ -1,0 +1,35 @@
+===== SMOKE: 3 arms, 32K window, 8 docs ~32K corpus, 5 questions =====
+(corpus ~= window so react should overflow within a few docs)
+
+######### mode=react #########
+Deep-research  mode=react  hard-window=32000  model=deepseek-v4-pro
+corpus: 8 dossiers ~40351 tokens (~1.3× window)  questions: 5  turns<=40
+  Q 3 revisit ✓ gold="50.0%"  pred: The primary benchmark accuracy of project Aurora i
+terminated_early   : false
+questions answered : 5/5
+accuracy           : 100%   (revisit: 100%)
+peak view tokens   : 9647  (window 32000)
+total prompt tokens: 31917  turns: 9
+offload/restore/compact: 0/0/0  fallbacks: 0
+
+######### mode=threshold #########
+Deep-research  mode=threshold  hard-window=32000  model=deepseek-v4-pro
+corpus: 8 dossiers ~40351 tokens (~1.3× window)  questions: 5  turns<=40
+terminated_early   : false
+questions answered : 5/5
+accuracy           : 100%   (revisit: 100%)
+peak view tokens   : 2839  (window 32000)
+total prompt tokens: 18231  turns: 9
+offload/restore/compact: 0/0/0  fallbacks: 0
+
+######### mode=cpat #########
+Deep-research  mode=cpat  hard-window=32000  model=deepseek-v4-pro
+corpus: 8 dossiers ~40351 tokens (~1.3× window)  questions: 5  turns<=40
+terminated_early   : false
+questions answered : 5/5
+accuracy           : 100%   (revisit: 100%)
+peak view tokens   : 5231  (window 32000)
+total prompt tokens: 55154  turns: 8
+offload/restore/compact: 0/0/0  fallbacks: 0
+
+===== SMOKE DONE =====

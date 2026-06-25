@@ -1,0 +1,33 @@
+===== SMOKE v3 (active-vs-passive): 3 arms, 32K window, 20 docs ~98K, buried-fact revisits =====
+
+######### mode=threshold #########
+  Q 8 revisit ✓ gold="INC-1000A"  pred: In Project Aurora's dossier, Section 5 (Incident L
+  Q 9 revisit ✓ gold="INC-4644E"  pred: Project Ember's incident code (from Section 5: Inc
+terminated_early   : false
+questions answered : 10/10
+accuracy           : 100%   (revisit: 100%)
+peak view tokens   : 22659  (window 32000)
+total prompt tokens: 142474  turns: 12
+offload/restore/compact: 18/0/0  fallbacks: 18
+
+######### mode=cpat #########
+  Q 8 revisit ✓ gold="INC-1000A"  pred: **INC-1000A**
+  Q 9 revisit ✗ gold="INC-4644E"  pred: No new question received — standing by for Questio
+terminated_early   : false
+questions answered : 10/10
+accuracy           : 90%   (revisit: 50%)
+peak view tokens   : 27654  (window 32000)
+total prompt tokens: 445786  turns: 29
+offload/restore/compact: 14/0/9  fallbacks: 12
+
+######### mode=react #########
+  Q 8 revisit ✗ gold="INC-1000A"  pred: 
+  Q 9 revisit ✗ gold="INC-4644E"  pred: 
+terminated_early   : true
+questions answered : 1/10
+accuracy           : 10%   (revisit: 0%)
+peak view tokens   : 147029  (window 32000)
+total prompt tokens: 58755  turns: 60
+offload/restore/compact: 0/0/0  fallbacks: 0
+
+===== DONE =====

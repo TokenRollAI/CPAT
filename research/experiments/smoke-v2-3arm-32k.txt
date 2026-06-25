@@ -1,0 +1,27 @@
+===== SMOKE v2: 3 arms, 32K window, 20 docs ~81K corpus (2.5x), no grep, aggregate Qs =====
+
+######### mode=react #########
+terminated_early   : true
+questions answered : 1/10
+accuracy           : 0%   (revisit: 0%)
+peak view tokens   : 60380  (window 32000)
+total prompt tokens: 24932  turns: 60
+offload/restore/compact: 0/0/0  fallbacks: 0
+
+######### mode=threshold #########
+terminated_early   : false
+questions answered : 10/10
+accuracy           : 100%   (revisit: 100%)
+peak view tokens   : 22497  (window 32000)
+total prompt tokens: 215583  turns: 13
+offload/restore/compact: 14/0/0  fallbacks: 14
+
+######### mode=cpat #########
+terminated_early   : false
+questions answered : 10/10
+accuracy           : 100%   (revisit: 100%)
+peak view tokens   : 28889  (window 32000)
+total prompt tokens: 304744  turns: 16
+offload/restore/compact: 20/0/0  fallbacks: 10
+
+===== SMOKE v2 DONE =====

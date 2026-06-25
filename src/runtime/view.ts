@@ -17,7 +17,10 @@ import { ContentStore } from "./stores.ts";
  * volatile parts (manifest, budget reports) are appended at the TAIL so the
  * persisted prefix keeps hitting DeepSeek's context cache.
  */
-export function buildMessages(store: BlockStore): {
+export function buildMessages(
+  store: BlockStore,
+  ephemeralTailMessages?: ChatMessage[],
+): {
   messages: ChatMessage[];
   view: ContextView;
 } {
@@ -28,6 +31,13 @@ export function buildMessages(store: BlockStore): {
     if (block.visibility !== "model") continue;
     viewIds.push(block.id);
     messages.push(renderBlock(store, block));
+  }
+
+  // Ephemeral tail messages are per-call instructions that must not become
+  // blocks. Keep them immediately before the manifest so the stable prefix
+  // remains the persisted block sequence.
+  if (ephemeralTailMessages?.length) {
+    messages.push(...ephemeralTailMessages);
   }
 
   // Volatile tail: the manifest is rebuilt every turn and never stored as a

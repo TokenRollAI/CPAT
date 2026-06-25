@@ -88,8 +88,8 @@ export class ContextRuntime {
 
   // -- view + budget ------------------------------------------------------------
 
-  buildView(): { messages: ChatMessage[]; view: ContextView } {
-    const { messages, view } = buildMessages(this.blocks);
+  buildView(ephemeralTailMessages?: ChatMessage[]): { messages: ChatMessage[]; view: ContextView } {
+    const { messages, view } = buildMessages(this.blocks, ephemeralTailMessages);
     this.lastEstimate = view.token_budget.used;
     view.token_budget = this.budget(view.token_budget.used);
     return { messages, view };
@@ -134,9 +134,9 @@ export class ContextRuntime {
 
   /**
    * Budget monitor. Called before each LLM call:
-   *   soft      → inject a budget_report block; the agent decides what to patch.
-   *   must_act  → same report; system policy requires the agent to patch or
-   *               explicitly answer no_context_update_needed.
+   *   soft      → inject a budget_report block; task turns should stay narrow.
+   *   must_act  → same report; boundary maintenance or imminent overflow should
+   *               produce a minimal patch / explicit no-op.
    *   critical  → runtime safety net: force-offload largest tool results,
    *               then report what happened.
    */
