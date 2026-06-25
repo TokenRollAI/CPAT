@@ -116,6 +116,7 @@ ARCHITECTURE.md            context_update 工具的设计与实现详解
 
 ## 文档导航
 
+- [`blog/cpat-from-idea-to-result.md`](blog/cpat-from-idea-to-result.md) — **从想法到结果的全过程复盘**：受 CAT 论文启发、block/工具设计、五组失败实验、方向修正、最终验证。
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — **context_update 怎么设计的**：8 个 op、数据模型、事务引擎、护栏、扩展指南。
 - [`research/`](research/) — 研究全过程（[研究日志](research/00-research-log.md)、[双扫结果](research/experiments/04-full-double-sweep.md)）。
 - [`llmdoc/`](llmdoc/) — 稳定项目知识（[核心概念](llmdoc/must/core-concepts.md)、[运行时](llmdoc/architecture/context-runtime.md)、decisions）。
