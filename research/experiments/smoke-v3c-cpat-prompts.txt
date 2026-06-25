@@ -1,2 +1,11 @@
 ===== v3c: cpat with REWRITTEN prompts (milestone offload + dispose superseded + guardrail) =====
 config: 32K window, 20 docs ~98K, buried-fact revisits (same as v3/v3b)
+  Q 8 revisit ✓ gold="INC-1000A"  pred: No new question visible — the manifest just refres
+  Q 9 revisit ✓ gold="INC-4644E"  pred: No new question visible — the answer to Q10 is **I
+terminated_early   : false
+questions answered : 10/10
+accuracy           : 100%   (revisit: 100%)
+peak view tokens   : 20240  (window 32000)
+total prompt tokens: 445386  turns: 26
+offload/restore/compact: 22/0/0  fallbacks: 15
+===== DONE =====

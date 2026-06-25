@@ -1,0 +1,57 @@
+############################################################
+# FULL DOUBLE SWEEP: {32K, 200K} x {react, threshold, cpat}
+############################################################
+
+===== WINDOW 32K (20 docs ~100K corpus, 12 questions) =====
+
+######### 32K / react #########
+terminated_early   : true
+questions answered : 1/12
+accuracy           : 0%   (revisit: 0%)
+peak view tokens   : 75089  (window 32000)
+total prompt tokens: 31740  turns: 70
+offload/restore/compact: 0/0/0  fallbacks: 0
+
+######### 32K / threshold #########
+terminated_early   : false
+questions answered : 12/12
+accuracy           : 100%   (revisit: 100%)
+peak view tokens   : 27077  (window 32000)
+total prompt tokens: 305434  turns: 16
+offload/restore/compact: 15/0/0  fallbacks: 15
+
+######### 32K / cpat #########
+terminated_early   : false
+questions answered : 12/12
+accuracy           : 100%   (revisit: 100%)
+peak view tokens   : 19233  (window 32000)
+total prompt tokens: 464041  turns: 38
+offload/restore/compact: 23/0/4  fallbacks: 16
+
+===== WINDOW 200K (40 docs ~480K corpus, 12 questions) =====
+
+######### 200K / react #########
+terminated_early   : true
+questions answered : 1/12
+accuracy           : 8.3%   (revisit: 0%)
+peak view tokens   : 202624  (window 200000)
+total prompt tokens: 714175  turns: 90
+offload/restore/compact: 0/0/0  fallbacks: 0
+
+######### 200K / threshold #########
+terminated_early   : false
+questions answered : 12/12
+accuracy           : 100%   (revisit: 100%)
+peak view tokens   : 172106  (window 200000)
+total prompt tokens: 2819420  turns: 23
+offload/restore/compact: 20/0/0  fallbacks: 20
+
+######### 200K / cpat #########
+terminated_early   : false
+questions answered : 12/12
+accuracy           : 100%   (revisit: 100%)
+peak view tokens   : 25542  (window 200000)
+total prompt tokens: 488333  turns: 29
+offload/restore/compact: 3/0/1  fallbacks: 0
+
+############### SWEEP DONE ###############

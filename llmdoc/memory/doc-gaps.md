@@ -4,9 +4,10 @@
 
 ## 开放缺口
 
-1. **H1 阈值压缩对比基线缺失**
-   已具备 ReAct 对照能力（`src/agent/loop.ts` `AgentMode`，无治理的「零治理」对照臂，见 `architecture/benchmark-harness.md`），但这不是 H1 所需的**阈值压缩基线**——仓库仍无 threshold-compression runner，「agent 自选 patch vs 阈值压缩」仍无法严格对照。
-   闭合标准：实现 threshold-compression 基线 runner，并补一篇 guides/对比实验流程文档。
+1. **H1 三臂对照能力已具备（缺口收窄）**
+   ~~仓库仍无 threshold-compression runner~~ → **已实现 threshold 臂**（`src/agent/loop.ts` `AgentMode="threshold"`：有 runtime 安全网被动 offload、不给 agent `context_update`），与 `react`（零治理）+ `cpat`（主动治理）构成**完整三臂对照**，见 `architecture/benchmark-harness.md` §1。受限窗口双扫已用三臂跑出决定性结果（治理>不治理、200K 下主动 CPAT 省 83% token，见 `memory/decisions/0007-bounded-window-cpat-value.md`）。
+   剩余缺口：尚无一篇 `guides/` 文档沉淀「三臂受限窗口对照实验」的可重复流程（如何选窗口/语料倍数/无 grep/回访 schedule）。
+   闭合标准：补一篇 guides/ 对比实验流程文档。
 
 2. **token 估算启发式未对真实 tokenizer 验证**
    `src/util/misc.ts` (`estimateTokens`) 的 0.3/0.6 系数仅靠 `prompt_tokens` 在线校准（钳制 [0.5, 2]），未与 DeepSeek 真实 tokenizer 离线比对。
@@ -16,9 +17,9 @@
    两者默认关闭，行为仅由 patch.ts 代码与 test 4/5 覆盖；redact 的 `version+=1` 写新 content key 路径无正向测试。
    闭合标准：开 `--allow-redact`/`--allow-replace` 跑一次真实任务并补正向测试。
 
-4. **可逆吞吐（offload→restore）的价值未被验证**
-   CPAT 区别于 ReAct 的核心独门能力是 offload→restore 可逆吞吐,但五组实验(含 longloop 25 万 ~30.7 万 token 语料)中 restore 调用全程为 0、ReAct 从未撑爆——V4 Pro 的百万窗口让「必须用 restore 才能完成」的场景无法构造（见 `memory/decisions/0005-cpat-value-requires-superwindow-scale.md`、`0006-reposition-cpat-as-cost-optimization.md`）。该能力的价值既未证伪也未证实。
-   闭合标准：构造一个信息真正超过模型物理窗口、ReAct 必然失败（api_error>0）的场景,观测 CPAT 是否凭 restore 完成任务;或明确论证在可及条件下无法构造并据此定论。
+4. **可逆吞吐（offload→restore）的价值未被验证（仍开放）**
+   CPAT 区别于 ReAct 的核心独门能力是 offload→restore 可逆吞吐。前五组（百万窗口，restore=0、ReAct 从未撑爆）与受限窗口双扫（32K/200K，已构造出 ReAct 因窗口耗尽提前终止的场景，治理价值已强证明）**都仍未触发 restore**——信息源是静态文件、可重读，agent 永远选 re-read 而非 restore。该能力的独立价值既未证伪也未证实（双扫已证明的是「治理 > 不治理」与「主动 CPAT 效率 > 被动 threshold」，不依赖 restore；见 `memory/decisions/0007-bounded-window-cpat-value.md`、`0005`、`0006`）。
+   闭合标准：构造一个「信息源不可重得」（非静态文件、无法 re-read）的任务，观测 CPAT 是否凭 restore 完成而 re-read 路径不可用；或明确论证在可及条件下无法构造并据此定论。
 
 ## 已关闭
 

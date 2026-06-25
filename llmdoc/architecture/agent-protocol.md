@@ -2,17 +2,40 @@
 
 agent 侧的全部契约：系统提示词、工具 schema、DeepSeek 客户端行为、主循环、指标语义、测试清单。代码位于 `src/agent/` + `src/deepseek/client.ts` + `test/patch.test.ts`。运行时核心见 `llmdoc/architecture/context-runtime.md`。
 
+## 0. 三对照臂与硬窗口（`src/agent/loop.ts`）
+
+`AgentMode = "cpat" | "react" | "threshold"`（`runAgent` 的可选 `mode`，默认 `"cpat"`）——隔离「主动治理 vs 被动治理 vs 零治理」：
+
+| mode | 注册工具 | system prompt | budget 监控 / runtime 兜底 | 角色 |
+| --- | --- | --- | --- | --- |
+| `cpat` | task tools + `artifact_get` + `context_update` | `SYSTEM_PROMPT`（含治理指引） | `checkBudget()` 全程，critical 兜底 | 主动治理 |
+| `threshold` | task tools（**无 context_update / artifact_get**） | `REACT_SYSTEM_PROMPT`（无治理指引） | `checkBudget()` 全程，critical 被动 offload | 被动治理基线 |
+| `react` | task tools | `REACT_SYSTEM_PROMPT` | **全旁路**：`pressure` 恒 `"ok"`、不调 `checkBudget` | 零治理（会撑爆） |
+
+`threshold` 是 H1 缺失已久的「阈值压缩基线」：有 runtime 安全网（critical 时被动 force-offload）但不给 agent `context_update` 工具，从而把「主动 vs 被动治理」与「治理 vs 不治理」两个变量分开。
+
+**硬窗口机制**（`hardWindowTokens`，默认 0=无）：渲染 view 超过该 token 数时，**react 臂被强制终止**（复现 CAT 论文 arXiv:2512.22087「dialogue terminates early」——窗口耗尽后无法纳入新信息）；threshold/cpat 不终止（它们靠 runtime 安全网把 context 压回窗口内）。指标 `terminated_early`（是否提前终止）与 `peak_view_tokens`（全程峰值渲染 token）随之上报。
+
+**`taskToolNames` 过滤**（可选）：只注册指定的 task 工具，例如只给 `list_dir`+`read_file`（去 `grep_search`），强制 agent 整篇读、无法 grep 选择性跳过——制造真正的累积压力。
+
+这三个旋钮支撑受限窗口双扫的决定性结果（见 `llmdoc/architecture/benchmark-harness.md` 与 decision `0007-bounded-window-cpat-value.md`）。
+
 ## 1. SYSTEM_PROMPT 契约（src/agent/loop.ts `SYSTEM_PROMPT`）
 
 注入为不可修补的 `system_prompt` block，对 agent 的约束：
 
 - **block 标签**：runtime 给消息打 `[block:<id>]`；agent 禁止在自己的回复里写 `[block:...]`。
 - **manifest**：每轮最后一条 user 消息是 `<context_manifest>`（可见块 + 可恢复 archived 块），每轮重建，agent 不应直接回答它。
-- **维护时机**：提示词把 `context_update` 定位为**边界维护工具**——任务 loop 结束后、下一条 user message 进入后、或临近溢出时使用；常规任务回合不要为整理而整理，避免频繁改写 stable prefix。
-- **压力策略**：`pressure=soft` 时收窄新探索、等边界 pass 整理已消化内容；`pressure=must_act` 时避免 broad task tools，必要时做最小 `context_update` 或基于已知证据收尾，也可显式 `no_context_update_needed`；`critical` 由 runtime 兜底。
-- **操作优先级**：提示词列出全部可用 op，并固化「优先便宜、可逆、tail-local」：`set_visibility=archived` < `payload_offload` < `restore` < `compact/fold/merge`；restore 标注为 offload 的逆操作，merge/fold 各带其触发场景说明。
+- **里程碑策略（DURING-task，提示重写后的核心）**：提示词明确「working context 是 BOUNDED 且小于待读材料，放任 raw read 累积会溢出被截断」，要求**读完一篇 tool_result 立刻 `payload_offload` 该 raw 块**、只在一行里留下精确事实（exact names/numbers/IDs/codes），只保留正在用的少数 raw 块——这是「读得远超窗口」的方式。不再只在边界整理。
+- **处置陈旧块**：compact/fold/merge 后源块自动 archived；若某 raw 块**还另外被 offload 过**且其关键事实已进 summary，用 `set_visibility=hidden` 让它离开 manifest，避免「summary 与陈旧 raw/offloaded 块同时争用 context」并诱导重读。
+- **re-read vs restore**：offload 过的块若后续需要精确原文，用 `restore`（或 `artifact_get`）而非重读整篇大文件——restore 比重读数千 token 文档便宜。
+- **压力策略**：`soft` 时立刻开始 offload 已消化内容、不等；`must_act` 时本轮先 offload/hide 笨重已消化块再读新内容、或基于已知证据收尾，确实无可释放则回 `no_context_update_needed` + 一行理由；`critical` 由 runtime 兜底（语义盲、largest-first，靠它说明治理不及时）。
+- **操作优先级**：固化「优先便宜、可逆」：`set_visibility`（archive/hide）< `payload_offload` < `restore` < `compact/fold/merge`；每个 op 都说明 preserve 精确事实、compact 整链一起、fold 连续区间、merge 用 resolution。
+- **preserve 精确事实硬约束**：每个 patch 必须保住 user 需求、**当前问题**、task state、open questions、以及已收集的 EXACT 事实——summary 绝不能把精确事实糊成模糊表述。compact/fold/merge **不可吞当前问题（最近 user_message）与 task_state**（runtime 护栏强制，见 context-runtime.md §4）。
 - **id 纪律**：禁止编造 id；protected 块可 compact/archive 但约束必须存活在某个可见块；**NEVER include budget_\* ids in a patch**（runtime-owned）。
-- **task policy**：少量多次读文件；压力下不开 broad 新战线；任务完成时回复纯文本最终答案、无 tool calls。followup 进入后由 runtime 触发一次维护 pass。
+- **task policy**：read → digest → offload → repeat，不让 raw read 累积；任务完成时回复纯文本最终答案、无 tool calls。
+
+> 三层提示协同：上面的 `SYSTEM_PROMPT`（harness 层）+ `context_update` 的 tool description（工具层，见 §2）+ runtime 边界提示（boundary 层，见 §5）共同贯彻「里程碑式读完即 offload、处置陈旧块、preserve 精确事实」策略。重写动机与「prompt-only 主动治理的瓶颈在架构（治理 tool call 每次有 LLM 往返开销）」的发现见 `research/00-research-log.md` 阶段 5。`react`/`threshold` 臂用极简 `REACT_SYSTEM_PROMPT`（仅 block-tag/manifest 纪律 + task policy，无任何治理指引）。
 
 ## 2. 工具面（src/agent/contextTool.ts）
 
@@ -78,6 +101,7 @@ OpenAI 兼容 `POST {baseUrl}/chat/completions`，全局 fetch、零依赖、Bea
 - `governance_nudges` = 普通任务回合在 `must_act` 压力下仍继续开 task tools 的软提醒次数；不再代表“本轮必须 patch”硬门。
 - `boundary_maintenance_calls` = followup user message 进入后触发的 ephemeral 维护 pass 次数（包括空 operations no-op）。
 - `cache_hit_ratio = cache_hit / prompt`（3 位小数）；`final_visible_*` 取末态 `blocks.visible()`。
+- **受限窗口指标**：`terminated_early`（bool）= react 臂渲染 view 超过 `hardWindowTokens` 被强制终止（复现 CAT 论文「dialogue terminates early」）；`peak_view_tokens` = 全程峰值渲染 token（衡量 context 是否贴着窗口跑）。双扫中 react 两窗口 `terminated_early=true`、peak 75K/202K 爆窗口 → 0% / 8.3%；cpat peak 仅 19K/25K（主动压低），见 `benchmark-harness.md`。
 - 实验解读（README H1-H4）：关注 `agent_patches_applied` 与 `runtime_fallback_offloads` 的**比例**——兜底占比高 = agent 治理不及时，退化成被动压缩。
 
 一次失败事务可含多条 rejection（rule 计数 > 失败事务数是正常现象）。
@@ -89,7 +113,7 @@ OpenAI 兼容 `POST {baseUrl}/chat/completions`，全局 fetch、零依赖、Bea
 - `test/contextTool.test.ts`：覆盖 `parseContextUpdateArgs` 扁平 schema → 内部 union 的映射、默认值、显式 no-op、未知 op 抛错。
 - `test/agentLoop.test.ts`：覆盖 CPAT followup 前会跑一次 ephemeral `context_update` 边界维护 pass、该 pass 只暴露 `context_update` 且不落为 block；不强制 `tool_choice:"required"` 以兼容 DeepSeek thinking mode；ReAct 模式跳过。
 
-**patch 引擎测试（test/patch.test.ts，12 个用例）**：
+**patch 引擎测试（test/patch.test.ts，13 个用例）**：
 
 | # | 测试 | 守护的不变量 |
 | --- | --- | --- |
@@ -105,3 +129,4 @@ OpenAI 兼容 `POST {baseUrl}/chat/completions`，全局 fetch、零依赖、Bea
 | 10 | restore re-inlines an offloaded payload (inverse of payload_offload) | offload→restore 往返 content 等于原 payload；kind/tool_call_id 不变；未 offload 块 restore 拒 `not_offloaded` |
 | 11 | merge consolidates overlapping blocks and archives the sources | `merge_arity`（1 id 拒）；2 块 archived、生成含 `merged` 的 summary、source_ids 正确 |
 | 12 | fold collapses a contiguous range and rejects a non-contiguous set | `fold_scope`（空 label 拒）+ `fold_range`（跳块拒）；连续 3 块 archived、生成 scoped summary |
+| 13 | compact cannot swallow the current question (semantic-drift guardrail) | `protected_current_question`：含当前问题（最近 user_message）的 compact 被拒、事务零变更；只压已答旧轮允许 |

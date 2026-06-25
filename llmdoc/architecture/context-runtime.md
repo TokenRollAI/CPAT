@@ -1,6 +1,6 @@
 # 上下文运行时（Context Runtime）
 
-CPAT 运行时核心：数据模型、单份存储、patch 事务引擎、预算监控、视图构建。代码位于 `src/runtime/` + `src/types.ts`。所有不变量由 `test/patch.test.ts`（12 个离线测试，全部通过）守护。
+CPAT 运行时核心：数据模型、单份存储、patch 事务引擎、预算监控、视图构建。代码位于 `src/runtime/` + `src/types.ts`。所有不变量由 `test/patch.test.ts`（13 个离线测试，全部通过）守护。
 
 ## 1. 数据模型（src/types.ts）
 
@@ -75,6 +75,8 @@ CPAT 运行时核心：数据模型、单份存储、patch 事务引擎、预算
 | `compact_output` | output 缺 description 或 content | summary 必须可独立替代原文 |
 | `compact_policy` | preserve 为空或 drop 非数组 | 强制 agent 显式声明保留/丢弃策略，防止无脑压缩 |
 | `hidden_target` | compact/merge/fold 目标为 hidden | hidden 块需先恢复可见再处理（由共享 `collapseIntoBlock` 统一拒绝） |
+| `protected_state` | compact/merge/fold 目标是 `task_state` 块 | 把任务状态压成有损 summary 会让 agent 丢失进度——必须 archive 或 restore，不可折叠 |
+| `protected_current_question` | compact/merge/fold 目标是当前问题（最近 `user_message`） | 当前问题须逐字保留，否则 agent「忘了在答什么」（v3 smoke 实测的语义漂移失效模式） |
 | `offload_replacement` | 缺 description/summary/retrieval_hint | 恢复线索不能丢——offload 后唯一找回入口是这些字段 + uri |
 | `offload_kind` | 目标非 tool_result / assistant_message | 只有大 payload 块值得 offload；原件与摘要不适用 |
 | `already_offloaded` | content 已是 ArtifactRef | 幂等保护 |
@@ -99,7 +101,7 @@ CPAT 运行时核心：数据模型、单份存储、patch 事务引擎、预算
 
 **`restore` 零拷贝逆操作**：offload 的镜像。校验目标 content 是 ArtifactRef（否则 `not_offloaded`）、从 `content.get(contentKey(b))` 取回全文（缺失则 `artifact_missing`），把 content 翻回 inline string、用 `describeText("Restored payload", …)` 重生成 description、重算 token_count。payload 始终在 block 的 `<id>@v<version>` 当前键下（offload 从不改 version），故 version 不变、不写新键；不碰 visibility/kind/api，**永不破链**（test 10 守护往返一致 + `not_offloaded` 拒绝）。
 
-**`collapseIntoBlock(i, ids, targets, description, contentText)` 共享 helper**：`compact` / `merge` / `fold` 三者的公共主体——把 targets 全部置 archived（命中 hidden 则拒 `hidden_target`），并在**最早目标的位置**（`store.order` 中最小索引的前一个块之后）stage 一个替换 summary 块。三者只在前置校验与 description 前缀上不同：
+**`collapseIntoBlock(i, ids, targets, description, contentText)` 共享 helper**：`compact` / `merge` / `fold` 三者的公共主体——把 targets 全部置 archived（命中 hidden 则拒 `hidden_target`），并在**最早目标的位置**（`store.order` 中最小索引的前一个块之后）stage 一个替换 summary 块。**语义漂移护栏**（共享前置检查）：targets 含 `task_state` 块拒 `protected_state`、含当前问题（最近 `user_message`）拒 `protected_current_question`——这两类活动对话状态不能被折叠成有损 summary（v3 smoke 实测：未护栏时主动 compact 把当前问题压没，agent「忘了在答什么」，质量反输被动 threshold；加护栏后两者打平 100%，见 decision `0007-bounded-window-cpat-value.md`）。三者只在前置校验与 description 前缀上不同：
 - `compact`：直接用 `output.description`。
 - `merge`：description 前缀 `[merged]` 或 `[merged (contradiction resolved)]`（按 resolution）。
 - `fold`：description 前缀 `[folded scope: <label>]`。
