@@ -19,25 +19,31 @@ export const contextUpdateTool: ToolDefinition = {
     name: "context_update",
     strict: true,
     description:
-      "Edit the blocks that will be rendered into FUTURE context views. Use this as a boundary " +
-      "maintenance tool: after a task loop has ended, after a new user message changes what context " +
-      "is relevant, or when overflow is imminent. Avoid using it as busywork inside every reasoning " +
-      "turn; unnecessary patches rewrite the stable prefix and can reduce context-cache hits.\n\n" +
+      "Edit the blocks that will be rendered into FUTURE context views — your working context is " +
+      "bounded, so use this to keep only what you need and offload the rest as you go. Use it (1) " +
+      "incrementally during a task: right after you finish reading a large document/tool_result, " +
+      "offload that raw block so context does not pile up; (2) at boundaries: when a new question " +
+      "changes what is relevant; and (3) whenever overflow is imminent. Batch operations into one " +
+      "transaction when you can, to limit prefix churn.\n\n" +
       "Target blocks by ids from <context_manifest>. The tool never changes the message you are " +
       "currently reading; it changes the block store used for later LLM calls. Transactional: every " +
       "operation is validated against a staged copy. If ANY operation is rejected, nothing is applied " +
       "and the returned rule/message tells you how to retry. An empty operations list is an accepted " +
-      "no-op for boundary passes where no update is worthwhile.\n\n" +
-      "Call discipline: preserve user requirements, current task state, open questions, exact source " +
-      "references, and any information likely to be needed by the next user request. Prefer cheap, " +
-      "reversible, tail-local changes. Avoid compacting early high-reuse blocks unless the token " +
-      "savings clearly outweigh the cache disruption.\n\n" +
+      "no-op when no update is worthwhile.\n\n" +
+      "Dispose of superseded blocks: once a block's key facts live in a summary or an offload note, " +
+      "do not leave the original ALSO competing in context — archive it, or set_visibility=hidden if " +
+      "you will not need it again. Avoid a summary and its stale source both staying visible.\n\n" +
+      "Call discipline: always preserve user requirements, the current question, task state, open " +
+      "questions, and the EXACT facts you have gathered (names, numbers, IDs, codes, source refs) — " +
+      "verbatim, never blurred into a vague summary. You may NOT compact/fold/merge the current " +
+      "question or task_state.\n\n" +
       "Operation choice by cost/risk: (1) set_visibility=archived parks irrelevant-but-recoverable " +
-      "blocks. (2) payload_offload keeps a short summary while moving bulky raw payload text behind " +
-      "an artifact reference. (3) restore re-inlines an offloaded payload when the new task needs exact " +
-      "text. (4) compact/fold/merge rewrite several blocks into a summary/canonical block; sources are " +
-      "archived, so the view becomes lossy even though recovery is possible. redact/replace are gated " +
-      "rewrite operations and may be disabled.\n\n" +
+      "blocks; =hidden removes a block whose facts are captured elsewhere. (2) payload_offload keeps a " +
+      "short fact-bearing summary while moving bulky raw payload text behind an artifact reference. (3) " +
+      "restore re-inlines an offloaded payload when you need its exact text again (cheaper than " +
+      "re-reading the source). (4) compact/fold/merge rewrite several blocks into a summary/canonical " +
+      "block; sources are archived, so the view becomes lossy even though recovery is possible. " +
+      "redact/replace are gated rewrite operations and may be disabled.\n\n" +
       "Tool-call chains are atomic: an assistant message with tool_calls and ALL matching tool_result " +
       "blocks must be patched together, including already-offloaded tool results, or the transaction " +
       "is rejected with chain_atomicity.",

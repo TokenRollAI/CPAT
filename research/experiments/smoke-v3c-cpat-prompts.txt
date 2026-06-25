@@ -1,0 +1,2 @@
+===== v3c: cpat with REWRITTEN prompts (milestone offload + dispose superseded + guardrail) =====
+config: 32K window, 20 docs ~98K, buried-fact revisits (same as v3/v3b)
