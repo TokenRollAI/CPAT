@@ -64,6 +64,7 @@ function parseArgs(argv: string[]): { task: string; config: CpatConfig; workdir:
     softLimitRatio: 0.7,
     mustActRatio: 0.8,
     criticalRatio: 0.95,
+    generational: flags.get("gen") === true,
     allowReplace: flags.get("allow-replace") === true,
     allowRedact: flags.get("allow-redact") === true,
     strictTools: true,

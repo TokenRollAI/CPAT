@@ -1,5 +1,6 @@
 node_modules/
 runs/
+data/
 .env
 .llmdoc-tmp/
 *.log

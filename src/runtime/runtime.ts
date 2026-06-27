@@ -30,6 +30,14 @@ export class ContextRuntime {
   /** Calibration: actual prompt tokens vs our estimate for the same view. */
   private lastEstimate = 0;
   private lastActualPrompt = 0;
+  /**
+   * Cache economics, learned from the last call's usage. cachedFraction is the
+   * share of prompt tokens DeepSeek served from cache (the prefix that survived
+   * our last edit). It drives the net-benefit gate: a cheap cached prefix means
+   * keeping a bulky block costs little, so offload must clear a higher bar.
+   */
+  private cachedFraction = 0;
+  private llmCalls = 0;
   runtimeFallbacks = 0;
   readonly config: CpatConfig;
 
@@ -89,7 +97,9 @@ export class ContextRuntime {
   // -- view + budget ------------------------------------------------------------
 
   buildView(ephemeralTailMessages?: ChatMessage[]): { messages: ChatMessage[]; view: ContextView } {
-    const { messages, view } = buildMessages(this.blocks, ephemeralTailMessages);
+    const { messages, view } = buildMessages(this.blocks, ephemeralTailMessages, {
+      generational: this.config.generational,
+    });
     this.lastEstimate = view.token_budget.used;
     view.token_budget = this.budget(view.token_budget.used);
     return { messages, view };
@@ -105,7 +115,9 @@ export class ContextRuntime {
 
   /** Calibrated estimate of the next call's prompt tokens. */
   estimatedUsed(): number {
-    const { view } = buildMessages(this.blocks);
+    const { view } = buildMessages(this.blocks, undefined, {
+      generational: this.config.generational,
+    });
     const est = view.token_budget.used;
     if (this.lastActualPrompt > 0 && this.lastEstimate > 0) {
       const ratio = Math.min(2, Math.max(0.5, this.lastActualPrompt / this.lastEstimate));
@@ -116,6 +128,11 @@ export class ContextRuntime {
 
   recordLlmCall(model: string, usage: ChatUsage, view: ContextView): void {
     this.lastActualPrompt = usage.prompt_tokens;
+    this.llmCalls += 1;
+    const hit = usage.prompt_cache_hit_tokens;
+    if (hit !== undefined && usage.prompt_tokens > 0) {
+      this.cachedFraction = Math.min(1, hit / usage.prompt_tokens);
+    }
     this.journal.append("llm_call", {
       model,
       usage,
@@ -147,7 +164,11 @@ export class ContextRuntime {
 
     let reportPressure: "soft" | "must_act" | "critical" = pressure;
     if (pressure === "critical") {
-      this.criticalFallback();
+      if (this.config.generational) {
+        this.generationalFallback();
+      } else {
+        this.criticalFallback();
+      }
       used = this.estimatedUsed();
       const after = this.pressureOf(used);
       // still report what the fallback did, even if pressure is relieved
@@ -213,6 +234,81 @@ export class ContextRuntime {
         "runtime",
       );
       this.runtimeFallbacks += 1;
+    }
+  }
+
+  /**
+   * Generational safety net. Instead of poking holes anywhere in the view, this
+   * retires bulky tool-result chain GROUPS from the volatile tail in a single
+   * batch, gated by net benefit (all in units of payloadTokens × FULL):
+   *
+   *   cost of KEEPING inline T more turns ≈ T × (1 − cachedFraction)
+   *       (each turn re-sends the block; only the uncached share is paid)
+   *   cost of OFFLOADING now              ≈ 1
+   *       (a single full re-read if the block is revisited later)
+   *
+   * Offload only when keeping is the more expensive option:
+   *       T × (1 − cachedFraction) > 1
+   * so we SKIP (return early) when T × (1 − cachedFraction) ≤ 1. With a warm
+   * cache (cachedFraction→1) keeping is nearly free, so the bar to offload is
+   * high; with a cold cache (cachedFraction→0) even a couple of remaining turns
+   * justify offloading. Survivors are promoted to a fresh generation so the
+   * retired generation is always the contiguous oldest tail.
+   */
+  private generationalFallback(): void {
+    const soft = this.config.maxContextTokens * this.config.softLimitRatio;
+    const estRemainingTurns = Math.max(
+      1,
+      this.config.maxTurns - this.llmCalls,
+    );
+    // Net-benefit gate: skip offload when keeping the warm cache is cheaper than
+    // offloading and possibly restoring later.
+    if (estRemainingTurns * (1 - this.cachedFraction) <= 1) return;
+
+    // Bulky inline tool-result blocks are the only worthwhile offload targets;
+    // retire them oldest-first (insertion order) one chain at a time until we
+    // drop back under the soft limit, promoting each retired block's generation
+    // forward so the rendered tail stays a contiguous, prefix-preserving region.
+    const targets = this.blocks
+      .visible()
+      .filter(
+        (b) =>
+          b.kind === "tool_result" &&
+          typeof b.content === "string" &&
+          b.token_count >= 300,
+      );
+
+    for (const target of targets) {
+      if (this.estimatedUsed() < soft) break;
+      const text = target.content as string;
+      const ops: ContextOperation[] = [
+        {
+          op: "payload_offload",
+          ids: [target.id],
+          store: "file",
+          replace_with: {
+            description: `${target.description} (runtime batch-offloaded)`,
+            summary:
+              `Batch-offloaded under budget pressure (generational tail). Head of payload:\n` +
+              text.slice(0, 300),
+            retrieval_hint: `Call artifact_get with this block's uri if the raw payload is needed.`,
+          },
+        },
+      ];
+      const res = this.applyUpdate(
+        { operations: ops, reason: "runtime generational batch fallback" },
+        "runtime",
+      );
+      // Only promote/count a block we actually offloaded: if applyUpdate was
+      // rejected (validation, etc.) the block is still inline, so advancing its
+      // generation would wrongly reorder a block that never moved to the tail.
+      if (res.ok) {
+        // Promote: the offloaded block (now a small ref) moves to a fresh
+        // generation at the tail end, so what remains of the old generation stays
+        // a clean contiguous prefix rather than a hole-punched region.
+        this.blocks.setGeneration(target.id, this.blocks.allocGeneration());
+        this.runtimeFallbacks += 1;
+      }
     }
   }
 

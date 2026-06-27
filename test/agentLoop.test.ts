@@ -21,6 +21,7 @@ function makeConfig(overrides: Partial<CpatConfig> = {}): CpatConfig {
     softLimitRatio: 0.7,
     mustActRatio: 0.8,
     criticalRatio: 0.95,
+    generational: false,
     allowReplace: false,
     allowRedact: false,
     strictTools: true,
