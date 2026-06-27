@@ -20,6 +20,20 @@ export class BlockStore {
   private readonly content: ContentStore;
   private readonly journal: Journal;
 
+  /**
+   * Generational tail bookkeeping (runtime-only state — not part of the
+   * ContextBlock schema, the journal, or anything the agent can patch).
+   *
+   * In generational rendering, the volatile large tool-result blocks are pushed
+   * to the TAIL of the rendered view and grouped into generations. Deletion
+   * (offload) only happens by retiring whole generations from the oldest end, so
+   * the stable prefix never gets a hole punched in it. `genOf` records which
+   * generation a block belongs to; `nextGen` hands out a fresh, strictly larger
+   * generation id when survivors are promoted past a retired one.
+   */
+  private readonly genOf = new Map<string, number>();
+  private nextGen = 0;
+
   constructor(content: ContentStore, journal: Journal) {
     this.content = content;
     this.journal = journal;
@@ -214,6 +228,45 @@ export class BlockStore {
       }
     }
     return chain;
+  }
+
+  /**
+   * Partition the given blocks into ordered, non-overlapping chain groups,
+   * preserving insertion order. A group is either a single standalone block or a
+   * whole tool-call chain (assistant tool_calls head + its tool_result members).
+   *
+   * Groups are the atomic unit of generational reordering: DeepSeek requires an
+   * assistant tool_calls message to be immediately followed by its tool results,
+   * so we may reorder GROUPS relative to each other but never split one.
+   */
+  chainGroups(blocks: ContextBlock[]): ContextBlock[][] {
+    const seen = new Set<string>();
+    const groups: ContextBlock[][] = [];
+    const inScope = new Set(blocks); // O(1) membership vs O(N) array includes
+    for (const b of blocks) {
+      if (seen.has(b.id)) continue;
+      const chain = this.chainOf(b).filter((c) => inScope.has(c));
+      for (const c of chain) seen.add(c.id);
+      groups.push(chain);
+    }
+    return groups;
+  }
+
+  // -- generational tail bookkeeping -----------------------------------------
+
+  /** Generation id a block currently belongs to, or undefined if untracked. */
+  generationOf(id: string): number | undefined {
+    return this.genOf.get(id);
+  }
+
+  /** Place a block into a specific generation (used when promoting survivors). */
+  setGeneration(id: string, gen: number): void {
+    this.genOf.set(id, gen);
+  }
+
+  /** Allocate the next strictly-larger generation id. */
+  allocGeneration(): number {
+    return this.nextGen++;
   }
 }
 

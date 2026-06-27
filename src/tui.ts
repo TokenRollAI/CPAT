@@ -119,6 +119,7 @@ async function run(): Promise<void> {
     softLimitRatio: 0.7,
     mustActRatio: 0.8,
     criticalRatio: 0.95,
+    generational: false,
     allowReplace: false,
     allowRedact: false,
     strictTools: true,

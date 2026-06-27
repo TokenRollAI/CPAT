@@ -298,6 +298,13 @@ export interface CpatConfig {
   mustActRatio: number;
   /** Fraction at which the runtime force-offloads largest tool results (default 0.95). */
   criticalRatio: number;
+  /**
+   * Generational tail rendering + batched, net-benefit-gated offload. When on,
+   * the view lays bulky tool-result payloads out at the tail in generations and
+   * retires whole generations at once, preserving the cached stable prefix.
+   * Off → legacy insertion-order rendering + per-block critical fallback.
+   */
+  generational: boolean;
   /** MVP gates: replace/redact are off by default per the staged plan. */
   allowReplace: boolean;
   allowRedact: boolean;

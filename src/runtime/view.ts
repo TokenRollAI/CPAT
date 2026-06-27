@@ -16,10 +16,20 @@ import { ContentStore } from "./stores.ts";
  * stable prefix that only changes where a patch touched it. The per-turn
  * volatile parts (manifest, budget reports) are appended at the TAIL so the
  * persisted prefix keeps hitting DeepSeek's context cache.
+ *
+ * Generational mode (config.generational) goes further: it physically lays out
+ * blocks by *volatility* rather than insertion order —
+ *   L0/L1  stable prefix : system, messages, summaries, small tool results
+ *   L2     volatile tail : large tool-result chain groups, ordered by generation
+ * Offload only ever retires whole generations from the oldest end of L2, so a
+ * patch never punches a hole into the stable prefix — it just truncates the
+ * tail. Reordering happens at chain-GROUP granularity so an assistant
+ * tool_calls message always stays immediately followed by its tool results.
  */
 export function buildMessages(
   store: BlockStore,
   ephemeralTailMessages?: ChatMessage[],
+  opts: { generational?: boolean } = {},
 ): {
   messages: ChatMessage[];
   view: ContextView;
@@ -27,8 +37,8 @@ export function buildMessages(
   const messages: ChatMessage[] = [];
   const viewIds: string[] = [];
 
-  for (const block of store.all()) {
-    if (block.visibility !== "model") continue;
+  const ordered = opts.generational ? layoutGenerational(store) : store.visible();
+  for (const block of ordered) {
     viewIds.push(block.id);
     messages.push(renderBlock(store, block));
   }
@@ -57,6 +67,64 @@ export function buildMessages(
     },
   };
 }
+
+/** Token threshold above which a tool_result is treated as a volatile L2 payload. */
+const TAIL_PAYLOAD_TOKENS = 300;
+
+/**
+ * Lay out visible blocks as stable-prefix (L0/L1) followed by a generational
+ * volatile tail (L2). Chain groups are the atomic unit: a group lands in L2 if
+ * any member is a bulky tool_result, otherwise it stays in the prefix.
+ *
+ * Cache-preserving tail order — by predicted lifespan, longest-lived FIRST:
+ * the bulky group most likely to be offloaded next sits at the very END of the
+ * view, so retiring it shifts nothing before it and the cached prefix survives.
+ * Predictor = recency: a recently-read group is more likely to be reused soon,
+ * so newest groups sort to the FRONT of the tail and the oldest unused group
+ * falls to the BACK — exactly the next offload target. Once a group is retired
+ * it carries a generation id and is pinned even further back, ordered by that
+ * id so successive retirements keep peeling from the same (tail) end.
+ */
+function layoutGenerational(store: BlockStore): ContextBlock[] {
+  const visible = store.visible();
+  const groups = store.chainGroups(visible);
+
+  const prefix: ContextBlock[][] = [];
+  const tail: ContextBlock[][] = [];
+  for (const group of groups) {
+    // A group belongs to the volatile tail if it carries a bulky tool_result OR
+    // it has already been retired to a ref. The retired case matters: once
+    // offloaded, a block's token_count drops below the bulky threshold, but it
+    // must NOT migrate back into the prefix — that would re-insert it at its
+    // old (mid-prefix) position and punch the very hole the tail layout avoids.
+    const tailGroup = group.some(
+      (b) =>
+        (b.kind === "tool_result" && b.token_count >= TAIL_PAYLOAD_TOKENS) ||
+        ContentStore.isRef(b.content),
+    );
+    (tailGroup ? tail : prefix).push(group);
+  }
+
+  // Order key (smaller = earlier in the tail = longer-lived, kept toward front):
+  //   - ungenerated (still-inline) groups: newest first, so the oldest unused
+  //     bulky group sits last and is the next offload target.
+  //   - generated (already-retired refs): pushed to the very back, ordered by
+  //     generation id so retirements always peel from the physical tail end.
+  // `i` is the group's insertion index within `tail` (ascending = oldest→newest).
+  const tailLen = tail.length;
+  const keyOf = (group: ContextBlock[], i: number): number => {
+    for (const b of group) {
+      const g = store.generationOf(b.id);
+      if (g !== undefined) return tailLen + g; // retired: behind all inline groups
+    }
+    return tailLen - 1 - i; // inline: newest (largest i) → smallest key → front
+  };
+  const indexed = tail.map((g, i) => ({ g, key: keyOf(g, i), i }));
+  indexed.sort((a, b) => a.key - b.key || a.i - b.i);
+
+  return [...prefix.flat(), ...indexed.map((x) => x.g).flat()];
+}
+
 
 function renderBlock(store: BlockStore, block: ContextBlock): ChatMessage {
   const tag = `[block:${block.id}]`;
